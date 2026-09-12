@@ -325,8 +325,6 @@ def apply_theme_css() -> None:
     st.markdown(
         f"""
 <style>
-@import url("https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap");
-
 :root {{
   --bnp-bg: {tokens["bg"]};
   --bnp-card: {tokens["card"]};
@@ -347,7 +345,7 @@ def apply_theme_css() -> None:
 html, body, [data-testid="stAppViewContainer"], .stApp {{
   background: var(--bnp-bg) !important;
   color: var(--bnp-text) !important;
-  font-family: "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial, sans-serif !important;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif !important;
 }}
 [data-testid="stHeader"] {{
   background: transparent !important;

@@ -77,19 +77,25 @@ PAGE = r"""
     th, td { text-align: left; padding: .45rem .55rem; border-bottom: 1px solid var(--border); }
     th { color: var(--muted); }
     a { color: var(--accent); }
-    .wrap { overflow: auto; max-height: 420px; }
+    details.how {
+      margin-top: 1rem; background: var(--card); border: 1px solid var(--border);
+      border-radius: 16px; padding: .85rem 1.2rem; color: var(--muted);
+    }
+    details.how summary { cursor: pointer; color: var(--text); font-weight: 600; }
+    details.how ul { margin: .7rem 0 0; padding-left: 1.2rem; }
+    details.how li { margin: .35rem 0; }
   </style>
 </head>
 <body>
 <main>
   <h1>BNP Paribas ISIN Scraper Utility</h1>
-  <p class="sub">Plain HTTPS — no WebSocket. Paste Fund tree links from fundsquare.net, one per line.</p>
+  <p class="sub">Streamline the extraction of ISIN identifiers from fundsquare.net fund structures.</p>
 
   <form id="form">
     <div class="grid">
       <section class="card">
         <h2>⚙ Scraping Configuration</h2>
-        <label>Identify data to extract?</label>
+        <label title="The choice applies to every link you paste on the right.">Identify data to extract?</label>
         <div class="radios">
           <label><input type="radio" name="mode" value="fund" checked> Whole fund structure</label>
           <label><input type="radio" name="mode" value="sub"> Specific sub-funds</label>
@@ -99,32 +105,49 @@ PAGE = r"""
       <section class="card">
         <h2>🔗 Fund Tree URLs</h2>
         <textarea id="urls" name="urls" placeholder="https://www.fundsquare.net/fund-tree?idInstr=114412"></textarea>
-        <button type="submit" id="go">Scrape ISINs</button>
+        <button type="submit" id="go">SCRAPE ISINs</button>
         <p class="status" id="status"></p>
       </section>
     </div>
   </form>
 
   <section class="card" id="results-card" style="margin-top:1rem; display:none;">
-    <h2>📊 Results Summary</h2>
+    <p class="hint" style="margin:0 0 .2rem; font-weight:600; color: var(--text);">📊 Results</p>
+    <h2 style="color:#D8F3E4; font-size:1.35rem;">Results Summary</h2>
     <div id="summary"></div>
     <label><input type="checkbox" id="details"> Show fund, sub-fund and share class columns</label>
     <p><a class="btn" id="csv" href="#">Download CSV</a></p>
     <div class="wrap"><table id="table"></table></div>
     <div id="problems"></div>
   </section>
+
+  <details class="how">
+    <summary>How it works</summary>
+    <ul>
+      <li>The fund tree on fundsquare.net is rendered server-side: every click on a sub-fund is a plain HTTP request that returns the whole page with that node expanded.</li>
+      <li>The application keeps one session per link (the server ties its state to cookies), opens each sub-fund with roughly one request per second and parses every response.</li>
+      <li>ISINs are extracted from the share-class rows with a regular expression (2 letters + 9 alphanumerics + 1 check digit) and de-duplicated per fund.</li>
+      <li><strong>Whole fund structure</strong> collects every sub-fund (a folderId in the link is ignored). <strong>Specific sub-funds</strong> collects only the sub-fund of each pasted link (the link must contain folderId=..., which appears in the address bar after you click the sub-fund).</li>
+      <li>Broken links are skipped and reported in the Links with problems table.</li>
+    </ul>
+  </details>
 </main>
 <script>
-const hintFund = "Paste the fund-tree link of the fund. The app opens every sub-fund. Any folderId in the link is ignored.";
-const hintSub = "Click the sub-fund on fundsquare.net, then copy the address-bar link (it contains folderId=...). One link = one sub-fund.";
+const hintFund = "Paste the fund-tree link of the fund (for example ...fund-tree?idInstr=114412). The app opens every sub-fund and collects all ISINs. Any folderId in the link is ignored.";
+const hintSub = "On fundsquare.net click the sub-fund, then copy the link from the address bar (it contains folderId=...). One link = one sub-fund; you can paste several.";
+const placeholderFund = "https://www.fundsquare.net/fund-tree?idInstr=114412";
+const placeholderSub = "https://www.fundsquare.net/fund-tree?_eventId=expand&folderId=34166&idInstr=114412#34166\nhttps://www.fundsquare.net/fund-tree?_eventId=expand&folderId=169257&idInstr=114412#169257";
 const hint = document.getElementById("hint");
+const urlsInput = document.getElementById("urls");
 const form = document.getElementById("form");
 const statusEl = document.getElementById("status");
 const go = document.getElementById("go");
 let jobId = null, lastPayload = null, timer = null;
 
 function currentHint() {
-  hint.textContent = document.querySelector("input[name=mode]:checked").value === "sub" ? hintSub : hintFund;
+  const sub = document.querySelector("input[name=mode]:checked").value === "sub";
+  hint.textContent = sub ? hintSub : hintFund;
+  urlsInput.placeholder = sub ? placeholderSub : placeholderFund;
 }
 document.querySelectorAll("input[name=mode]").forEach(el => el.addEventListener("change", currentHint));
 currentHint();
@@ -141,7 +164,7 @@ form.addEventListener("submit", async (e) => {
   const res = await fetch("/jobs", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const data = await res.json();
   if (!res.ok) {
-    statusEl.innerHTML = '<span class="error">' + (data.error || "Could not start") + "</span>";
+    statusEl.innerHTML = '<span class="error">' + (data.error || "Unable to start extraction.") + "</span>";
     go.disabled = false;
     return;
   }

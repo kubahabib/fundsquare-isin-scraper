@@ -28,7 +28,7 @@ PAGE = r"""
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BNP Paribas ISIN Scraper Utility</title>
+  <title>Data Authority Paris ISIN Scraper Utility</title>
   <style>
     :root {
       --bg: #101614; --card: #1A221F; --text: #E8EEEB; --muted: #9AABA3;
@@ -88,7 +88,7 @@ PAGE = r"""
 </head>
 <body>
 <main>
-  <h1>BNP Paribas ISIN Scraper Utility</h1>
+  <h1>Data Authority Paris ISIN Scraper Utility</h1>
   <p class="sub">Streamline the extraction of ISIN identifiers from fundsquare.net fund structures.</p>
 
   <form id="form">

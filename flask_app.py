@@ -77,6 +77,21 @@ PAGE = r"""
     th, td { text-align: left; padding: .45rem .55rem; border-bottom: 1px solid var(--border); }
     th { color: var(--muted); }
     a { color: var(--accent); }
+    .wrap { overflow: auto; max-height: 420px; }
+    .isin-panel { max-width: 280px; margin: 0.2rem auto 0; }
+    .isin-list {
+      margin: 0; padding: 0.9rem 1rem; text-align: center;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 1rem; line-height: 1.75; letter-spacing: 0.04em;
+      color: var(--text); background: var(--input);
+      border: 1px solid var(--border); border-radius: 12px;
+      max-height: 420px; overflow: auto; white-space: pre;
+      user-select: text;
+    }
+    .copy-btn {
+      width: auto; display: block; margin: 0.7rem auto 0;
+      padding: 0.55rem 1.1rem; letter-spacing: 0.04em;
+    }
     details.how {
       margin-top: 1rem; background: var(--card); border: 1px solid var(--border);
       border-radius: 16px; padding: .85rem 1.2rem; color: var(--muted);
@@ -117,7 +132,11 @@ PAGE = r"""
     <div id="summary"></div>
     <label><input type="checkbox" id="details"> Show fund, sub-fund, share class and source links</label>
     <p><a class="btn" id="csv" href="#">Download CSV</a></p>
-    <div class="wrap"><table id="table"></table></div>
+    <div class="isin-panel" id="isin-panel" hidden>
+      <pre class="isin-list" id="isin-list"></pre>
+      <button type="button" class="copy-btn" id="copy-isins">Copy ISINs</button>
+    </div>
+    <div class="wrap" id="table-wrap"><table id="table"></table></div>
     <div id="problems"></div>
   </section>
 
@@ -190,6 +209,23 @@ async function poll() {
 }
 
 document.getElementById("details").addEventListener("change", render);
+document.getElementById("copy-isins").addEventListener("click", async () => {
+  const text = document.getElementById("isin-list").textContent;
+  const button = document.getElementById("copy-isins");
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "Copied";
+  } catch (err) {
+    const list = document.getElementById("isin-list");
+    const range = document.createRange();
+    range.selectNodeContents(list);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    button.textContent = "Selected — press Ctrl+C";
+  }
+  setTimeout(() => { button.textContent = "Copy ISINs"; }, 1600);
+});
 
 function render() {
   if (!lastPayload) return;
@@ -206,10 +242,21 @@ function render() {
       : '<div class="success">Found ' + lastPayload.unique_isins + " unique ISINs from "
         + lastPayload.ok_links + " of " + lastPayload.n_links + " links.</div>";
   document.getElementById("csv").href = "/jobs/" + jobId + "/csv?details=" + (details ? "1" : "0");
+  const isinPanel = document.getElementById("isin-panel");
+  const tableWrap = document.getElementById("table-wrap");
   const table = document.getElementById("table");
-  table.innerHTML = "<thead><tr>" + cols.map(c => "<th>" + c + "</th>").join("") + "</tr></thead><tbody>"
-    + rows.map(r => "<tr>" + cols.map(c => "<td>" + escapeHtml(r[c] || "") + "</td>").join("") + "</tr>").join("")
-    + "</tbody>";
+  if (!details && rows.length) {
+    isinPanel.hidden = false;
+    tableWrap.hidden = true;
+    document.getElementById("isin-list").textContent = rows.map(r => r.ISIN).join("\n");
+    table.innerHTML = "";
+  } else {
+    isinPanel.hidden = true;
+    tableWrap.hidden = false;
+    table.innerHTML = "<thead><tr>" + cols.map(c => "<th>" + c + "</th>").join("") + "</tr></thead><tbody>"
+      + rows.map(r => "<tr>" + cols.map(c => "<td>" + escapeHtml(r[c] || "") + "</td>").join("") + "</tr>").join("")
+      + "</tbody>";
+  }
   if (problems.length) {
     document.getElementById("problems").innerHTML = "<h3>Links with problems</h3><div class='wrap'><table><thead><tr><th>URL</th><th>Status</th><th>Details</th></tr></thead><tbody>"
       + problems.map(p => "<tr><td>" + escapeHtml(p.URL) + "</td><td>" + escapeHtml(p.Status) + "</td><td>" + escapeHtml(p.Details) + "</td></tr>").join("")

@@ -115,7 +115,7 @@ PAGE = r"""
     <p class="hint" style="margin:0 0 .2rem; font-weight:600; color: var(--text);">📊 Results</p>
     <h2 style="color:#D8F3E4; font-size:1.35rem;">Results Summary</h2>
     <div id="summary"></div>
-    <label><input type="checkbox" id="details"> Show fund, sub-fund and share class columns</label>
+    <label><input type="checkbox" id="details"> Show fund, sub-fund, share class and source links</label>
     <p><a class="btn" id="csv" href="#">Download CSV</a></p>
     <div class="wrap"><table id="table"></table></div>
     <div id="problems"></div>
@@ -196,7 +196,7 @@ function render() {
   const details = document.getElementById("details").checked;
   const cols = details
     ? ["ISIN", "Source URL", "Fund", "Sub-fund", "Share class"]
-    : ["ISIN", "Source URL"];
+    : ["ISIN"];
   const rows = lastPayload.results || [];
   const problems = lastPayload.problems || [];
   document.getElementById("results-card").style.display = "block";
@@ -324,7 +324,7 @@ def job_csv(job_id: str):
         if job is None or job["status"] != "done":
             return jsonify({"error": "CSV not ready"}), 404
         frame = job["results"]
-    columns = RESULT_COLUMNS if details else ["ISIN", "Source URL"]
+    columns = RESULT_COLUMNS if details else ["ISIN"]
     data = frame[columns].to_csv(index=False).encode("utf-8-sig")
     return Response(
         data,

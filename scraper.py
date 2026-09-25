@@ -1,8 +1,10 @@
 """Shared fundsquare.net ISIN scraping used by the Streamlit, Flask, and desktop apps."""
+import ctypes
 import re
 import ssl
 import sys
 import time
+from ctypes import wintypes
 from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import getproxies
 
@@ -52,6 +54,299 @@ class _WindowsCertAdapter(HTTPAdapter):
         return super().proxy_manager_for(proxy, **proxy_kwargs)
 
 
+def _store_cookies(jar: dict, raw_headers: str) -> None:
+    for line in raw_headers.splitlines():
+        if ":" not in line:
+            continue
+        name, value = line.split(":", 1)
+        if name.strip().lower() != "set-cookie":
+            continue
+        pair = value.strip().split(";", 1)[0]
+        if "=" not in pair:
+            continue
+        cookie_name, cookie_value = pair.split("=", 1)
+        jar[cookie_name.strip()] = cookie_value.strip()
+
+
+def _header_value(raw_headers: str, wanted: str) -> str:
+    wanted = wanted.lower()
+    for line in raw_headers.splitlines():
+        if ":" not in line:
+            continue
+        name, value = line.split(":", 1)
+        if name.strip().lower() == wanted:
+            return value.strip()
+    return ""
+
+
+class _Page:
+    def __init__(self, status_code: int, text: str):
+        self.status_code = status_code
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            error = requests.HTTPError(f"HTTP error {self.status_code}")
+            error.response = self
+            raise error
+
+
+class _WinHttpSession:
+    """GET through WinHTTP so Windows supplies the company proxy, login and certificates."""
+
+    def __init__(self):
+        self.headers: dict[str, str] = {}
+        self._cookies: dict[str, str] = {}
+
+    def get(self, url: str, timeout: int = 20) -> _Page:
+        return _winhttp_get(url, dict(self.headers), self._cookies, timeout)
+
+
+def _winhttp_dll():
+    try:
+        dll = ctypes.WinDLL("winhttp", use_last_error=True)
+    except OSError:
+        return None
+    handle = ctypes.c_void_p
+    dll.WinHttpOpen.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+    dll.WinHttpOpen.restype = handle
+    dll.WinHttpCloseHandle.argtypes = [handle]
+    dll.WinHttpCloseHandle.restype = wintypes.BOOL
+    dll.WinHttpSetTimeouts.argtypes = [handle, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    dll.WinHttpSetTimeouts.restype = wintypes.BOOL
+    dll.WinHttpSetOption.argtypes = [handle, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+    dll.WinHttpSetOption.restype = wintypes.BOOL
+    dll.WinHttpConnect.argtypes = [handle, wintypes.LPCWSTR, wintypes.WORD, wintypes.DWORD]
+    dll.WinHttpConnect.restype = handle
+    dll.WinHttpOpenRequest.argtypes = [
+        handle,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    dll.WinHttpOpenRequest.restype = handle
+    dll.WinHttpSendRequest.argtypes = [
+        handle,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+    dll.WinHttpSendRequest.restype = wintypes.BOOL
+    dll.WinHttpReceiveResponse.argtypes = [handle, ctypes.c_void_p]
+    dll.WinHttpReceiveResponse.restype = wintypes.BOOL
+    dll.WinHttpQueryHeaders.argtypes = [
+        handle,
+        wintypes.DWORD,
+        wintypes.LPCWSTR,
+        ctypes.c_void_p,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    ]
+    dll.WinHttpQueryHeaders.restype = wintypes.BOOL
+    dll.WinHttpQueryDataAvailable.argtypes = [handle, ctypes.POINTER(wintypes.DWORD)]
+    dll.WinHttpQueryDataAvailable.restype = wintypes.BOOL
+    dll.WinHttpReadData.argtypes = [handle, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    dll.WinHttpReadData.restype = wintypes.BOOL
+    dll.WinHttpQueryAuthSchemes.argtypes = [
+        handle,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    dll.WinHttpQueryAuthSchemes.restype = wintypes.BOOL
+    dll.WinHttpSetCredentials.argtypes = [
+        handle,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        ctypes.c_void_p,
+    ]
+    dll.WinHttpSetCredentials.restype = wintypes.BOOL
+    dll.WinHttpCrackUrl.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+    dll.WinHttpCrackUrl.restype = wintypes.BOOL
+    return dll
+
+
+def _winhttp_error() -> requests.RequestException:
+    code = ctypes.get_last_error()
+    hints = {
+        12002: "timed out",
+        12007: "DNS lookup failed",
+        12029: "cannot connect",
+        12175: "TLS certificate was rejected",
+    }
+    message = f"WinHTTP error {code}: {hints.get(code, 'request failed')}"
+    if code == 12175:
+        return requests.exceptions.SSLError(message)
+    if code == 12002:
+        return requests.exceptions.Timeout(message)
+    return requests.exceptions.ConnectionError(message)
+
+
+def _crack_url(dll, url: str) -> tuple[str, str, int, str]:
+    class _UrlParts(ctypes.Structure):
+        _fields_ = [
+            ("dwStructSize", wintypes.DWORD),
+            ("lpszScheme", wintypes.LPWSTR),
+            ("dwSchemeLength", wintypes.DWORD),
+            ("nScheme", ctypes.c_int),
+            ("lpszHostName", wintypes.LPWSTR),
+            ("dwHostNameLength", wintypes.DWORD),
+            ("nPort", wintypes.WORD),
+            ("lpszUserName", wintypes.LPWSTR),
+            ("dwUserNameLength", wintypes.DWORD),
+            ("lpszPassword", wintypes.LPWSTR),
+            ("dwPasswordLength", wintypes.DWORD),
+            ("lpszUrlPath", wintypes.LPWSTR),
+            ("dwUrlPathLength", wintypes.DWORD),
+            ("lpszExtraInfo", wintypes.LPWSTR),
+            ("dwExtraInfoLength", wintypes.DWORD),
+        ]
+
+    parts = _UrlParts()
+    parts.dwStructSize = ctypes.sizeof(parts)
+    scheme, host, path, extra = (
+        ctypes.create_unicode_buffer(16),
+        ctypes.create_unicode_buffer(256),
+        ctypes.create_unicode_buffer(2048),
+        ctypes.create_unicode_buffer(4096),
+    )
+    parts.lpszScheme = ctypes.cast(scheme, wintypes.LPWSTR)
+    parts.dwSchemeLength = len(scheme)
+    parts.lpszHostName = ctypes.cast(host, wintypes.LPWSTR)
+    parts.dwHostNameLength = len(host)
+    parts.lpszUrlPath = ctypes.cast(path, wintypes.LPWSTR)
+    parts.dwUrlPathLength = len(path)
+    parts.lpszExtraInfo = ctypes.cast(extra, wintypes.LPWSTR)
+    parts.dwExtraInfoLength = len(extra)
+    if not dll.WinHttpCrackUrl(url, 0, 0, ctypes.byref(parts)):
+        raise _winhttp_error()
+    object_name = (path.value or "/") + extra.value
+    return scheme.value.lower(), host.value, int(parts.nPort), object_name
+
+
+def _query_headers(dll, request) -> str:
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = wintypes.DWORD(ctypes.sizeof(buffer))
+    if not dll.WinHttpQueryHeaders(request, 22, None, ctypes.cast(buffer, ctypes.c_void_p), ctypes.byref(size), None):
+        return ""
+    return buffer.value
+
+
+def _query_status(dll, request) -> int:
+    status = wintypes.DWORD(0)
+    size = wintypes.DWORD(ctypes.sizeof(status))
+    if not dll.WinHttpQueryHeaders(
+        request, 19 | 0x20000000, None, ctypes.byref(status), ctypes.byref(size), None
+    ):
+        raise _winhttp_error()
+    return int(status.value)
+
+
+def _read_body(dll, request) -> bytes:
+    chunks = []
+    total = 0
+    while total < 5_000_000:
+        available = wintypes.DWORD(0)
+        if not dll.WinHttpQueryDataAvailable(request, ctypes.byref(available)) or available.value == 0:
+            break
+        block = ctypes.create_string_buffer(min(available.value, 65536))
+        read = wintypes.DWORD(0)
+        if not dll.WinHttpReadData(request, ctypes.cast(block, ctypes.c_void_p), len(block), ctypes.byref(read)) or read.value == 0:
+            break
+        chunks.append(block.raw[: read.value])
+        total += read.value
+    return b"".join(chunks)
+
+
+def _send(dll, request, header_text: str) -> None:
+    headers = header_text or None
+    length = 0xFFFFFFFF if headers else 0
+    if not dll.WinHttpSendRequest(request, headers, length, None, 0, 0, None):
+        raise _winhttp_error()
+    if not dll.WinHttpReceiveResponse(request, None):
+        raise _winhttp_error()
+
+
+def _winhttp_get(url: str, headers: dict, cookies: dict, timeout: int) -> _Page:
+    dll = _winhttp_dll()
+    if dll is None:
+        raise requests.exceptions.ConnectionError("WinHTTP is not available")
+    current = url
+    for _ in range(6):
+        scheme, host, port, object_name = _crack_url(dll, current)
+        hsession = hconnect = hrequest = None
+        try:
+            # 4 = automatic proxy: the same PAC and login settings Windows gives the browser.
+            hsession = dll.WinHttpOpen("DataAuthorityParisISINScraper", 4, None, None, 0)
+            if not hsession:
+                raise _winhttp_error()
+            milliseconds = int(timeout * 1000)
+            dll.WinHttpSetTimeouts(hsession, milliseconds, milliseconds, milliseconds, milliseconds)
+            protocols = wintypes.DWORD(0x00000800 | 0x00002000)
+            dll.WinHttpSetOption(hsession, 84, ctypes.byref(protocols), ctypes.sizeof(protocols))
+            hconnect = dll.WinHttpConnect(hsession, host, port, 0)
+            if not hconnect:
+                raise _winhttp_error()
+            flags = 0x00800000 if scheme == "https" else 0
+            hrequest = dll.WinHttpOpenRequest(hconnect, "GET", object_name, None, None, None, flags)
+            if not hrequest:
+                raise _winhttp_error()
+            disable_redirects = wintypes.DWORD(2)
+            dll.WinHttpSetOption(hrequest, 63, ctypes.byref(disable_redirects), ctypes.sizeof(disable_redirects))
+            decompression = wintypes.DWORD(3)
+            dll.WinHttpSetOption(hrequest, 118, ctypes.byref(decompression), ctypes.sizeof(decompression))
+            outgoing = dict(headers)
+            if cookies:
+                outgoing["Cookie"] = "; ".join(f"{name}={value}" for name, value in cookies.items())
+            header_text = "".join(f"{name}: {value}\r\n" for name, value in outgoing.items())
+            _send(dll, hrequest, header_text)
+            status = _query_status(dll, hrequest)
+            if status == 407:
+                supported = wintypes.DWORD(0)
+                first = wintypes.DWORD(0)
+                target = wintypes.DWORD(0)
+                if dll.WinHttpQueryAuthSchemes(
+                    hrequest, ctypes.byref(supported), ctypes.byref(first), ctypes.byref(target)
+                ):
+                    for auth_scheme in (16, 2):
+                        if supported.value & auth_scheme:
+                            dll.WinHttpSetCredentials(hrequest, 1, auth_scheme, None, None, None)
+                            _send(dll, hrequest, header_text)
+                            status = _query_status(dll, hrequest)
+                            break
+            raw_headers = _query_headers(dll, hrequest)
+            _store_cookies(cookies, raw_headers)
+            if status in (301, 302, 303, 307, 308):
+                location = _header_value(raw_headers, "location")
+                if not location:
+                    break
+                current = urljoin(current, location)
+                continue
+            charset = "utf-8"
+            content_type = _header_value(raw_headers, "content-type")
+            if "charset=" in content_type.lower():
+                charset = content_type.lower().split("charset=", 1)[1].split(";", 1)[0].strip().strip('"').strip("'") or charset
+            body = _read_body(dll, hrequest)
+            try:
+                text = body.decode(charset, errors="replace")
+            except LookupError:
+                text = body.decode("utf-8", errors="replace")
+            return _Page(status, text)
+        finally:
+            for handle in (hrequest, hconnect, hsession):
+                if handle:
+                    dll.WinHttpCloseHandle(handle)
+    raise requests.exceptions.ConnectionError(f"WinHTTP error: too many redirects for {url}")
+
+
 def _os_proxies() -> dict[str, str]:
     """Proxy from the OS. Windows often stores the HTTPS proxy with an https:// scheme."""
     found = {}
@@ -65,7 +360,20 @@ def _os_proxies() -> dict[str, str]:
     return found
 
 
-def _new_session() -> requests.Session:
+def _winhttp_ready() -> bool:
+    dll = _winhttp_dll()
+    if dll is None:
+        return False
+    handle = dll.WinHttpOpen("DataAuthorityParisISINScraper", 4, None, None, 0)
+    if not handle:
+        return False
+    dll.WinHttpCloseHandle(handle)
+    return True
+
+
+def _new_session():
+    if sys.platform == "win32" and _winhttp_ready():
+        return _WinHttpSession()
     session = requests.Session()
     session.headers.update(HEADERS)
     proxies = _os_proxies()
@@ -247,9 +555,11 @@ def describe_error(exc: Exception) -> str:
         detail = str(exc).splitlines()[0][:180]
         return f"TLS certificate error - the Windows proxy is likely inspecting HTTPS: {detail}"
     if isinstance(exc, requests.exceptions.ProxyError):
-        return "proxy error - the Windows proxy rejected the connection to fundsquare.net"
+        detail = str(exc).splitlines()[0][:220]
+        return f"proxy error - the Windows proxy rejected the connection to fundsquare.net: {detail}"
     if isinstance(exc, requests.exceptions.ConnectionError):
-        return "connection error - could not reach fundsquare.net"
+        detail = str(exc).splitlines()[0][:220]
+        return f"connection error - could not reach fundsquare.net: {detail}"
     return str(exc)
 
 

@@ -1,11 +1,8 @@
-"""
-fundsquare.net ISIN scraper - shared parsing and HTTP logic.
-
-Used by the Streamlit app, the Flask HTTP app, and Google Colab.
-"""
+"""Shared fundsquare.net ISIN scraping used by the Streamlit, Flask, and desktop apps."""
 import re
 import time
 from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.request import getproxies
 
 import pandas as pd
 import requests
@@ -104,7 +101,7 @@ def scrape_fund_tree(
     progress=None,
     single_sub_fund: bool = False,
 ):
-    """Collect ISINs from a fund-tree page. See app.py for the protocol notes."""
+    """Collect ISINs from one fund-tree URL. progress(done, total, message) is optional."""
     start_url, folder_id = parse_fund_tree_url(url)
     if single_sub_fund and folder_id is None:
         raise ValueError(
@@ -114,6 +111,10 @@ def scrape_fund_tree(
     only_folder = folder_id if single_sub_fund else None
     session = requests.Session()
     session.headers.update(HEADERS)
+    # Corporate PCs often set a proxy in the OS, not in HTTP_PROXY. requests misses that on its own.
+    proxies = {scheme: proxy for scheme, proxy in getproxies().items() if scheme in ("http", "https")}
+    if proxies:
+        session.proxies.update(proxies)
 
     session.get(start_url, timeout=timeout).raise_for_status()
     time.sleep(delay)

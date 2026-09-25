@@ -39,7 +39,7 @@ class ScraperApp(ctk.CTk):
         self.minsize(900, 640)
         self.configure(fg_color=COLOR_BG)
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(4, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
         self.results = None
         self.problems = None
@@ -55,30 +55,45 @@ class ScraperApp(ctk.CTk):
             self.state("zoomed")
 
     def _build(self) -> None:
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(10, 0))
+        self.scroll = ctk.CTkScrollableFrame(
+            self,
+            fg_color=COLOR_BG,
+            scrollbar_fg_color=COLOR_BG,
+            scrollbar_button_color=COLOR_BORDER,
+            scrollbar_button_hover_color=COLOR_ACCENT,
+        )
+        self.scroll.grid(row=0, column=0, sticky="nsew")
+
+        header = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        header.pack(fill="x", padx=28, pady=(18, 0))
         ctk.CTkLabel(
             header,
             text="Data Authority Paris ISIN Scraper Utility",
-            font=ctk.CTkFont(size=24, weight="bold"),
+            font=ctk.CTkFont(size=26, weight="bold"),
             text_color=COLOR_SUCCESS_TEXT,
             anchor="center",
         ).pack(fill="x")
+        ctk.CTkLabel(
+            self.scroll,
+            text="Streamline the extraction of ISIN identifiers from fundsquare.net fund structures.",
+            text_color=COLOR_MUTED,
+            font=ctk.CTkFont(size=14),
+            anchor="center",
+        ).pack(fill="x", padx=28, pady=(4, 14))
 
-        grid = ctk.CTkFrame(self, fg_color="transparent")
-        grid.grid(row=2, column=0, sticky="ew", padx=28, pady=(8, 0))
+        grid = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        grid.pack(fill="x", padx=28)
         grid.grid_columnconfigure((0, 1), weight=1, uniform="cards")
 
         config = self._card(grid, 0)
         ctk.CTkLabel(
             config, text="⚙  Scraping Configuration", font=ctk.CTkFont(size=16, weight="bold"), text_color=COLOR_TEXT
-        ).pack(anchor="w", padx=18, pady=(8, 2))
+        ).pack(anchor="w", padx=18, pady=(16, 8))
+        ctk.CTkLabel(config, text="Identify data to extract?", text_color=COLOR_TEXT).pack(anchor="w", padx=18)
         self.mode = tk.StringVar(value="fund")
-        radios = ctk.CTkFrame(config, fg_color="transparent")
-        radios.pack(fill="x", padx=18, pady=(2, 2))
         for label, value in (("Whole fund structure", "fund"), ("Specific sub-funds", "sub")):
             ctk.CTkRadioButton(
-                radios,
+                config,
                 text=label,
                 variable=self.mode,
                 value=value,
@@ -86,48 +101,49 @@ class ScraperApp(ctk.CTk):
                 hover_color=COLOR_HOVER,
                 text_color=COLOR_TEXT,
                 command=self._update_hint,
-            ).pack(side="left", padx=(0, 18))
+            ).pack(anchor="w", padx=18, pady=4)
         self.hint = ctk.CTkLabel(
-            config,
-            text=HINT_FUND,
-            text_color=COLOR_MUTED,
-            wraplength=460,
-            justify="left",
-            font=ctk.CTkFont(size=12),
+            config, text=HINT_FUND, text_color=COLOR_MUTED, wraplength=460, justify="left"
         )
-        self.hint.pack(anchor="w", padx=18, pady=(4, 8))
+        self.hint.pack(anchor="w", padx=18, pady=(10, 16))
 
         urls = self._card(grid, 1)
         ctk.CTkLabel(
             urls, text="🔗  Fund Tree URLs", font=ctk.CTkFont(size=16, weight="bold"), text_color=COLOR_TEXT
-        ).pack(anchor="w", padx=18, pady=(8, 2))
-        url_row = ctk.CTkFrame(urls, fg_color="transparent")
-        url_row.pack(fill="x", padx=18, pady=(2, 2))
+        ).pack(anchor="w", padx=18, pady=(16, 8))
         self.textbox = ctk.CTkTextbox(
-            url_row, height=36, fg_color=COLOR_INPUT, border_color=COLOR_BORDER, border_width=1, text_color=COLOR_TEXT
+            urls, height=120, fg_color=COLOR_INPUT, border_color=COLOR_BORDER, border_width=1, text_color=COLOR_TEXT
         )
-        self.textbox.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.textbox.pack(fill="x", padx=18)
         self.scrape_btn = ctk.CTkButton(
-            url_row,
+            urls,
             text="SCRAPE ISINs",
-            width=150,
             font=ctk.CTkFont(size=14, weight="bold"),
             fg_color=COLOR_ACCENT,
             hover_color=COLOR_HOVER,
-            height=36,
+            height=40,
             command=self.start_scraping,
         )
-        self.scrape_btn.pack(side="right")
+        self.scrape_btn.pack(fill="x", padx=18, pady=(12, 6))
         self.status = ctk.CTkLabel(urls, text="Ready", text_color=COLOR_MUTED, anchor="w")
-        self.status.pack(fill="x", padx=18, pady=(0, 6))
+        self.status.pack(fill="x", padx=18, pady=(0, 14))
 
-        self.progress = ctk.CTkProgressBar(self, progress_color=COLOR_ACCENT, fg_color=COLOR_BORDER)
-        self.progress.grid(row=3, column=0, sticky="ew", padx=28, pady=(8, 0))
+        self.progress = ctk.CTkProgressBar(self.scroll, progress_color=COLOR_ACCENT, fg_color=COLOR_BORDER)
+        self.progress.pack(fill="x", padx=28, pady=(14, 0))
         self.progress.set(0)
 
         self.results_card = ctk.CTkFrame(
-            self, fg_color=COLOR_CARD, border_color=COLOR_BORDER, border_width=1, corner_radius=16
+            self.scroll, fg_color=COLOR_CARD, border_color=COLOR_BORDER, border_width=1, corner_radius=16
         )
+        ctk.CTkLabel(self.results_card, text="📊  Results", text_color=COLOR_TEXT, font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=18, pady=(14, 0)
+        )
+        ctk.CTkLabel(
+            self.results_card,
+            text="Results Summary",
+            text_color=COLOR_SUCCESS_TEXT,
+            font=ctk.CTkFont(size=22, weight="bold"),
+        ).pack(anchor="w", padx=18, pady=(0, 8))
         self.summary = ctk.CTkLabel(
             self.results_card,
             text="",
@@ -139,19 +155,19 @@ class ScraperApp(ctk.CTk):
             wraplength=960,
             font=ctk.CTkFont(size=14, weight="bold"),
         )
-        self.summary.pack(fill="x", padx=18, pady=(8, 2))
+        self.summary.pack(fill="x", padx=18, pady=(0, 8))
         self.details = tk.BooleanVar(value=False)
-        actions = ctk.CTkFrame(self.results_card, fg_color="transparent")
-        actions.pack(fill="x", padx=18, pady=(2, 2))
         ctk.CTkCheckBox(
-            actions,
+            self.results_card,
             text="Show fund, sub-fund, share class and source links",
             variable=self.details,
             fg_color=COLOR_ACCENT,
             hover_color=COLOR_HOVER,
             text_color=COLOR_TEXT,
             command=self._apply_view,
-        ).pack(side="left", padx=(0, 12))
+        ).pack(anchor="w", padx=18, pady=(0, 6))
+        actions = ctk.CTkFrame(self.results_card, fg_color="transparent")
+        actions.pack(fill="x", padx=18, pady=(4, 8))
         self.copy_btn = ctk.CTkButton(
             actions,
             text="Copy ISINs",
@@ -185,7 +201,7 @@ class ScraperApp(ctk.CTk):
             font=ctk.CTkFont(family="Consolas" if sys.platform == "win32" else "Menlo", size=15),
             activate_scrollbars=True,
         )
-        self.isin_box.pack(fill="both", expand=True)
+        self.isin_box.pack(fill="x")
         self.isin_box.bind("<Key>", self._keep_isin_readonly)
 
         self.table_wrap = ctk.CTkFrame(self.view_host, fg_color="transparent")
@@ -292,7 +308,7 @@ class ScraperApp(ctk.CTk):
         self.progress.set(1)
         self.status.configure(text="Done")
         if not self.results_card.winfo_ismapped():
-            self.results_card.grid(row=4, column=0, sticky="nsew", padx=28, pady=(12, 18))
+            self.results_card.pack(fill="x", padx=28, pady=(12, 18))
 
         n_failed = problems.loc[problems["Status"] == "failed", "URL"].nunique() if not problems.empty else 0
         if results.empty:
@@ -315,6 +331,7 @@ class ScraperApp(ctk.CTk):
         self._fill_tables()
         self._apply_view()
         self._show_problems()
+        self.after(30, self._reveal_results)
 
     def _empty_reason(self, problems) -> str:
         if problems is None or problems.empty:
@@ -355,27 +372,32 @@ class ScraperApp(ctk.CTk):
             self.problems_wrap.pack_forget()
 
     def _size_isin_list(self) -> None:
-        """Keep about ten ISINs on screen. Windows scaling makes each line taller."""
+        """Give the ISIN box a fixed height of about ten lines. The page scrolls around it."""
+        self.update_idletasks()
         if not self.isin_wrap.winfo_ismapped():
             return
-        self.update_idletasks()
-        linespace = tkfont.Font(font=self.isin_box._textbox.cget("font")).metrics("linespace")
+        linespace = tkfont.Font(font=self.isin_box._textbox.cget("font")).metrics("linespace") or 18
         scaling = float(ctk.ScalingTracker.get_widget_scaling(self.isin_box)) or 1
         pixels = linespace * 10 + int(28 * scaling)
-        unscaled = max(1, int(pixels / scaling))
-        self.isin_box.configure(height=unscaled)
-        self.view_host.configure(height=unscaled)
-        self.view_host.pack_propagate(False)
+        self.isin_box.configure(height=max(1, int(pixels / scaling)))
+
+    def _reveal_results(self) -> None:
+        self.update_idletasks()
+        canvas = self.scroll._parent_canvas
+        canvas.update_idletasks()
+        bbox = canvas.bbox("all")
+        if not bbox or bbox[3] <= bbox[1]:
+            return
+        canvas.yview_moveto(min(1.0, max(0.0, self.results_card.winfo_y() / (bbox[3] - bbox[1]))))
 
     def _apply_view(self) -> None:
         if self.details.get() and self.results is not None and not self.results.empty:
             self.isin_wrap.pack_forget()
-            self.table_wrap.pack(fill="both", expand=True)
-            self.view_host.pack_propagate(True)
+            self.table_wrap.pack(fill="x", pady=(4, 8))
         else:
             self.table_wrap.pack_forget()
             if self.results is not None and not self.results.empty:
-                self.isin_wrap.pack(fill="both", expand=True)
+                self.isin_wrap.pack(fill="x", pady=(4, 8))
                 self._size_isin_list()
             else:
                 self.isin_wrap.pack_forget()

@@ -1,6 +1,8 @@
 name: Build Windows app
+
 on:
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: windows-latest
@@ -12,7 +14,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-desktop.txt pyinstaller
       - name: Build exe
-        run: pyinstaller --noconsole --onefile --collect-all customtkinter --name DataAuthorityParisISINScraper desktop_app.py
         run: pyinstaller --noconsole --onefile --collect-all customtkinter --collect-all certifi --hidden-import certifi --name DataAuthorityParisISINScraper desktop_app.py
       - uses: actions/upload-artifact@v7
         with:

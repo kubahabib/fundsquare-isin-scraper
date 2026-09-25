@@ -1,6 +1,7 @@
 """Desktop window for the fundsquare.net ISIN scraper. See README.md for how to run it."""
 from __future__ import annotations
 
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -35,9 +36,10 @@ class ScraperApp(ctk.CTk):
         super().__init__()
         ctk.set_appearance_mode("dark")
         self.title("Data Authority Paris ISIN Scraper Utility")
-        self.geometry("1100x820")
-        self.minsize(900, 680)
+        self.minsize(900, 640)
         self.configure(fg_color=COLOR_BG)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(4, weight=1)
 
         self.results = None
         self.problems = None
@@ -45,25 +47,33 @@ class ScraperApp(ctk.CTk):
 
         self._build()
         self._style_tables()
+        self.update_idletasks()
+        width = min(1100, max(900, self.winfo_screenwidth() - 80))
+        height = min(960, max(640, self.winfo_screenheight() - 100))
+        self.geometry(f"{width}x{height}")
+        if sys.platform == "win32":
+            self.state("zoomed")
 
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=28, pady=(18, 0))
+        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(18, 0))
         ctk.CTkLabel(
             header,
             text="Data Authority Paris ISIN Scraper Utility",
             font=ctk.CTkFont(size=26, weight="bold"),
             text_color=COLOR_SUCCESS_TEXT,
-        ).pack(anchor="w")
+            anchor="center",
+        ).pack(fill="x")
         ctk.CTkLabel(
             self,
             text="Streamline the extraction of ISIN identifiers from fundsquare.net fund structures.",
             text_color=COLOR_MUTED,
             font=ctk.CTkFont(size=14),
-        ).pack(anchor="w", padx=28, pady=(4, 14))
+            anchor="center",
+        ).grid(row=1, column=0, sticky="ew", padx=28, pady=(4, 14))
 
         grid = ctk.CTkFrame(self, fg_color="transparent")
-        grid.pack(fill="x", padx=28)
+        grid.grid(row=2, column=0, sticky="ew", padx=28)
         grid.grid_columnconfigure((0, 1), weight=1, uniform="cards")
 
         config = self._card(grid, 0)
@@ -93,7 +103,7 @@ class ScraperApp(ctk.CTk):
             urls, text="🔗  Fund Tree URLs", font=ctk.CTkFont(size=16, weight="bold"), text_color=COLOR_TEXT
         ).pack(anchor="w", padx=18, pady=(16, 8))
         self.textbox = ctk.CTkTextbox(
-            urls, height=120, fg_color=COLOR_INPUT, border_color=COLOR_BORDER, border_width=1, text_color=COLOR_TEXT
+            urls, height=88, fg_color=COLOR_INPUT, border_color=COLOR_BORDER, border_width=1, text_color=COLOR_TEXT
         )
         self.textbox.pack(fill="x", padx=18)
         self.scrape_btn = ctk.CTkButton(
@@ -110,7 +120,7 @@ class ScraperApp(ctk.CTk):
         self.status.pack(fill="x", padx=18, pady=(0, 14))
 
         self.progress = ctk.CTkProgressBar(self, progress_color=COLOR_ACCENT, fg_color=COLOR_BORDER)
-        self.progress.pack(fill="x", padx=28, pady=(14, 0))
+        self.progress.grid(row=3, column=0, sticky="ew", padx=28, pady=(14, 0))
         self.progress.set(0)
 
         self.results_card = ctk.CTkFrame(
@@ -147,21 +157,33 @@ class ScraperApp(ctk.CTk):
             text_color=COLOR_TEXT,
             command=self._apply_view,
         ).pack(anchor="w", padx=18, pady=(0, 6))
+        actions = ctk.CTkFrame(self.results_card, fg_color="transparent")
+        actions.pack(fill="x", padx=18, pady=(4, 8))
+        self.copy_btn = ctk.CTkButton(
+            actions,
+            text="Copy ISINs",
+            width=160,
+            fg_color=COLOR_ACCENT,
+            hover_color=COLOR_HOVER,
+            command=self.copy_isins,
+            state="disabled",
+        )
+        self.copy_btn.pack(side="left", padx=(0, 8))
         self.csv_btn = ctk.CTkButton(
-            self.results_card,
+            actions,
             text="Download CSV",
             fg_color=COLOR_ACCENT,
             hover_color=COLOR_HOVER,
             command=self.export_csv,
             state="disabled",
         )
-        self.csv_btn.pack(fill="x", padx=18, pady=(4, 8))
+        self.csv_btn.pack(side="left", fill="x", expand=True)
 
-        self.isin_wrap = ctk.CTkFrame(self.results_card, fg_color="transparent")
+        self.view_host = ctk.CTkFrame(self.results_card, fg_color="transparent")
+        self.view_host.pack(fill="both", expand=True, padx=18, pady=(0, 8))
+        self.isin_wrap = ctk.CTkFrame(self.view_host, fg_color="transparent")
         self.isin_box = ctk.CTkTextbox(
             self.isin_wrap,
-            width=280,
-            height=280,
             fg_color=COLOR_INPUT,
             border_color=COLOR_BORDER,
             border_width=1,
@@ -169,19 +191,10 @@ class ScraperApp(ctk.CTk):
             font=ctk.CTkFont(family="Menlo", size=15),
             activate_scrollbars=True,
         )
-        self.isin_box.pack()
+        self.isin_box.pack(fill="both", expand=True)
         self.isin_box.bind("<Key>", self._keep_isin_readonly)
-        self.copy_btn = ctk.CTkButton(
-            self.isin_wrap,
-            text="Copy ISINs",
-            width=160,
-            fg_color=COLOR_ACCENT,
-            hover_color=COLOR_HOVER,
-            command=self.copy_isins,
-        )
-        self.copy_btn.pack(pady=(8, 0))
 
-        self.table_wrap = ctk.CTkFrame(self.results_card, fg_color="transparent")
+        self.table_wrap = ctk.CTkFrame(self.view_host, fg_color="transparent")
         self.tree = ttk.Treeview(self.table_wrap, columns=RESULT_COLUMNS, show="headings", height=10)
         for column, width in zip(RESULT_COLUMNS, (140, 280, 220, 220, 160)):
             self.tree.heading(column, text=column)
@@ -251,6 +264,7 @@ class ScraperApp(ctk.CTk):
             return
         self.scrape_btn.configure(state="disabled")
         self.csv_btn.configure(state="disabled")
+        self.copy_btn.configure(state="disabled")
         self.progress.set(0)
         self.status.configure(text="Starting...")
         single = self.mode.get() == "sub"
@@ -284,7 +298,7 @@ class ScraperApp(ctk.CTk):
         self.progress.set(1)
         self.status.configure(text="Done")
         if not self.results_card.winfo_ismapped():
-            self.results_card.pack(fill="both", expand=True, padx=28, pady=(12, 18))
+            self.results_card.grid(row=4, column=0, sticky="nsew", padx=28, pady=(12, 18))
 
         n_failed = problems.loc[problems["Status"] == "failed", "URL"].nunique() if not problems.empty else 0
         if results.empty:
@@ -294,6 +308,7 @@ class ScraperApp(ctk.CTk):
                 text_color="#F0A8A8",
             )
             self.csv_btn.configure(state="disabled")
+            self.copy_btn.configure(state="disabled")
         else:
             unique = int(results["ISIN"].nunique())
             self.summary.configure(
@@ -302,6 +317,7 @@ class ScraperApp(ctk.CTk):
                 text_color=COLOR_SUCCESS_TEXT,
             )
             self.csv_btn.configure(state="normal")
+            self.copy_btn.configure(state="normal")
         self._fill_tables()
         self._apply_view()
         self._show_problems()
@@ -347,11 +363,11 @@ class ScraperApp(ctk.CTk):
     def _apply_view(self) -> None:
         if self.details.get() and self.results is not None and not self.results.empty:
             self.isin_wrap.pack_forget()
-            self.table_wrap.pack(fill="both", expand=True, padx=18, pady=(4, 8))
+            self.table_wrap.pack(fill="both", expand=True)
         else:
             self.table_wrap.pack_forget()
             if self.results is not None and not self.results.empty:
-                self.isin_wrap.pack(pady=(4, 8))
+                self.isin_wrap.pack(fill="both", expand=True)
             else:
                 self.isin_wrap.pack_forget()
 

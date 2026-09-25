@@ -1,14 +1,14 @@
 name: Build Windows app
-
 on:
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -16,6 +16,7 @@ jobs:
       - name: Build exe
         run: pyinstaller --noconsole --onefile --collect-all customtkinter --name DataAuthorityParisISINScraper desktop_app.py
       - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: DataAuthorityParisISINScraper
           path: dist/DataAuthorityParisISINScraper.exe

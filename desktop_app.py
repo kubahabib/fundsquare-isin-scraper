@@ -133,6 +133,7 @@ class ScraperApp(ctk.CTk):
             corner_radius=10,
             anchor="w",
             justify="left",
+            wraplength=960,
             font=ctk.CTkFont(size=14, weight="bold"),
         )
         self.summary.pack(fill="x", padx=18, pady=(0, 8))
@@ -288,7 +289,7 @@ class ScraperApp(ctk.CTk):
         n_failed = problems.loc[problems["Status"] == "failed", "URL"].nunique() if not problems.empty else 0
         if results.empty:
             self.summary.configure(
-                text="  No ISINs found. Check the links below.",
+                text=f"  {self._empty_reason(problems)}",
                 fg_color="#3A2424",
                 text_color="#F0A8A8",
             )
@@ -304,6 +305,16 @@ class ScraperApp(ctk.CTk):
         self._fill_tables()
         self._apply_view()
         self._show_problems()
+
+    def _empty_reason(self, problems) -> str:
+        if problems is None or problems.empty:
+            return "No ISINs found."
+        partial = problems[problems["Status"] == "partial"]
+        failed = problems[problems["Status"] == "failed"]
+        chosen = partial if not partial.empty else failed
+        if chosen.empty:
+            return "No ISINs found."
+        return f"No ISINs found. {chosen.iloc[0]['Details']}"
 
     def _fill_tables(self) -> None:
         isins = [] if self.results is None or self.results.empty else self.results["ISIN"].tolist()

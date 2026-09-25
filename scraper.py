@@ -1,5 +1,7 @@
 """Shared fundsquare.net ISIN scraping used by the Streamlit, Flask, and desktop apps."""
 import re
+import ssl
+import sys
 import time
 from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import getproxies
@@ -7,6 +9,7 @@ from urllib.request import getproxies
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
 
 BASE_URL = "https://www.fundsquare.net"
 REQUEST_DELAY = 1.0
@@ -25,6 +28,52 @@ HEADERS = {
 ISIN_RE = re.compile(r"\b[A-Z]{2}[A-Z0-9]{9}\d\b")
 RESULT_COLUMNS = ["ISIN", "Source URL", "Fund", "Sub-fund", "Share class"]
 PROBLEM_COLUMNS = ["URL", "Status", "Details"]
+
+
+class _WindowsCertAdapter(HTTPAdapter):
+    """Use the Windows certificate store so a bank proxy's HTTPS inspection is trusted."""
+
+    def _ssl_context(self):
+        context = ssl.create_default_context()
+        try:
+            import certifi
+
+            context.load_verify_locations(cafile=certifi.where())
+        except (ImportError, OSError, ssl.SSLError):
+            pass
+        return context
+
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        pool_kwargs["ssl_context"] = self._ssl_context()
+        return super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        proxy_kwargs["ssl_context"] = self._ssl_context()
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+
+def _os_proxies() -> dict[str, str]:
+    """Proxy from the OS. Windows often stores the HTTPS proxy with an https:// scheme."""
+    found = {}
+    for scheme, proxy in getproxies().items():
+        if scheme not in ("http", "https") or not proxy:
+            continue
+        proxy = str(proxy).strip()
+        if sys.platform == "win32" and proxy.lower().startswith("https://"):
+            proxy = "http://" + proxy[8:]
+        found[scheme] = proxy
+    return found
+
+
+def _new_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    proxies = _os_proxies()
+    if proxies:
+        session.proxies.update(proxies)
+    if sys.platform == "win32":
+        session.mount("https://", _WindowsCertAdapter())
+    return session
 
 
 def parse_fund_tree_url(url: str) -> tuple[str, str | None]:
@@ -109,12 +158,7 @@ def scrape_fund_tree(
             "sub-fund and copy the link from the address bar"
         )
     only_folder = folder_id if single_sub_fund else None
-    session = requests.Session()
-    session.headers.update(HEADERS)
-    # Corporate PCs often set a proxy in the OS, not in HTTP_PROXY. requests misses that on its own.
-    proxies = {scheme: proxy for scheme, proxy in getproxies().items() if scheme in ("http", "https")}
-    if proxies:
-        session.proxies.update(proxies)
+    session = _new_session()
 
     session.get(start_url, timeout=timeout).raise_for_status()
     time.sleep(delay)
@@ -199,6 +243,11 @@ def describe_error(exc: Exception) -> str:
     if isinstance(exc, requests.exceptions.HTTPError):
         status = exc.response.status_code if exc.response is not None else "?"
         return f"HTTP error {status}"
+    if isinstance(exc, requests.exceptions.SSLError):
+        detail = str(exc).splitlines()[0][:180]
+        return f"TLS certificate error - the Windows proxy is likely inspecting HTTPS: {detail}"
+    if isinstance(exc, requests.exceptions.ProxyError):
+        return "proxy error - the Windows proxy rejected the connection to fundsquare.net"
     if isinstance(exc, requests.exceptions.ConnectionError):
         return "connection error - could not reach fundsquare.net"
     return str(exc)
